@@ -40,10 +40,10 @@ export function Login({ onLogin }) {
       <div className="row wrap"><a className="btn primary" href="/tobi">💬 Open TOBi — customer onboarding</a><a className="btn" href="/scan">▦ QR code to try it on your phone</a></div></div>
     <div className="r">
       <h1>Employee sign-in</h1>
-      <form className="col" onSubmit={e => { e.preventDefault(); go(u, p); }}><input className="input" autoCapitalize="none" autoCorrect="off" autoComplete="username" placeholder="Username (e.g. admin)" value={u} onChange={e => setU(e.target.value)} /><input className="input" type="password" autoComplete="current-password" placeholder="Password (demo123)" value={p} onChange={e => setP(e.target.value)} onKeyDown={e => e.key === 'Enter' && go(u, p)} />
+      <form className="col" onSubmit={e => { e.preventDefault(); go(u, p); }}><input className="input" autoCapitalize="none" autoCorrect="off" autoComplete="username" placeholder="Username (e.g. admin)" value={u} onChange={e => setU(e.target.value)} /><input className="input" type="password" autoComplete="current-password" placeholder="Password" id="pw" value={p} onChange={e => setP(e.target.value)} onKeyDown={e => e.key === 'Enter' && go(u, p)} />
         {err && <div style={{ color: 'var(--red)' }}>{err}</div>}<button type="submit" className="btn primary">Sign in</button></form>
-      <div className="kicker" style={{ marginTop: 10 }}>Demo accounts — password demo123</div>
-      <div className="roles">{(users || []).map(x => <button key={x.username} className="role" onClick={() => go(x.username, 'demo123')}><div className="b">{x.roleName}</div><div className="small mut">{x.name} · <span className="mono">{x.username}</span></div></button>)}</div>
+      <div className="kicker" style={{ marginTop: 10 }}>Demo accounts — pick a role, then enter the access code shared with the jury</div>
+      <div className="roles">{(users || []).map(x => <button key={x.username} className="role" onClick={() => { setU(x.username); setErr(''); setTimeout(() => document.getElementById('pw')?.focus(), 0); }}><div className="b">{x.roleName}</div><div className="small mut">{x.name} · <span className="mono">{x.username}</span></div></button>)}</div>
     </div>
   </div>;
 }
@@ -258,7 +258,7 @@ export function Scan() {
       <img src={'/api/qr?text=' + encodeURIComponent(url)} alt="QR code to TOBi" className="scan-qr" />
       <a className="btn primary" href="/tobi" style={{ justifyContent: 'center' }}>💬 Open TOBi</a>
       <div className="mono small mut" style={{ marginTop: 8 }}>{url}</div>
-      <div className="scan-staff"><b>Then see your request on the staff side</b><div className="small mut">Open <a href={base}>{base.replace(/^https?:\/\//, '')}</a> and click a role (Operations, AML/CFT, Compliance, Risk, Internal Control, Legal, Audit) — password <b>demo123</b>. Your case appears in the Command Center within seconds.</div></div>
+      <div className="scan-staff"><b>Then see your request on the staff side</b><div className="small mut">Open <a href={base}>{base.replace(/^https?:\/\//, '')}</a> and click a role (Operations, AML/CFT, Compliance, Risk, Internal Control, Legal, Audit) and enter the access code shared with the jury. Your case appears in the Command Center within seconds.</div></div>
       <div className="tiny mut" style={{ marginTop: 14 }}>Hackathon prototype · all data is fictional · do not upload real personal documents.</div>
     </div>
   </div>;

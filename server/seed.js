@@ -1,5 +1,6 @@
 // Realistic FICTIONAL demo data. No real customer data.
 import { backfillCalls } from './trust.js';
+import { demoPassword } from './security.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { run, get, all, s, wipe, setSetting, DATA_DIR, db } from './db.js';
@@ -36,7 +37,7 @@ function seedInner() {
 
   // ---- roles, permissions, users ----
   for (const [code, r] of Object.entries(ROLES)) { run('INSERT INTO roles(code,name,department) VALUES(?,?,?)', code, r.name, r.dept); for (const p of PERMS[code]) run('INSERT INTO permissions(role,permission) VALUES(?,?)', code, p); }
-  for (const [u, n, r] of USERS) { const { hash, salt } = hashPw('demo123'); run('INSERT INTO users(username,password_hash,salt,name,role) VALUES(?,?,?,?,?)', u, hash, salt, n, r); }
+  for (const [u, n, r] of USERS) { const { hash, salt } = hashPw(demoPassword()); run('INSERT INTO users(username,password_hash,salt,name,role) VALUES(?,?,?,?,?)', u, hash, salt, n, r); }
 
   // ---- policies (configurable rules) ----
   const P = [

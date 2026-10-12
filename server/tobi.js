@@ -523,8 +523,10 @@ function quizAction(ctx, { action_id, step, answer }) {
 
 export async function handleUpload(token, file) {
   const ctx = load(token);
-  const doc = saveUpload({ application_id: ctx.app.id, filename: file.filename, mime: file.mime, data: file.data, doc_type: file.doc_type || null });
-  userSay(ctx.conv.id, file.filename, 'upload', { doc_id: doc.id, mime: file.mime });
+  let doc;
+  try { doc = saveUpload({ application_id: ctx.app.id, filename: file.filename, mime: file.mime, data: file.data, doc_type: file.doc_type || null }); }
+  catch (e) { say(ctx.conv.id, `🔒 ${/accepted|too large/i.test(e.message) ? e.message : 'This file could not be processed.'} Please send a photo (JPG, PNG) or a PDF.`); audit({ actor: 'Guardrail', system: 'TOBi', action: 'Upload rejected (file type check)', entity: 'application:' + ctx.app.id, rule: 'UPLOAD_MAGIC_BYTES' }); return save(ctx); }
+  userSay(ctx.conv.id, doc.filename, 'upload', { doc_id: doc.id, mime: doc.mime });
   audit({ actor: 'Customer', system: 'TOBi', action: 'Document uploaded', entity: 'application:' + ctx.app.id, new_state: file.filename });
   const ex = await extractDocument(doc, file.doc_type || null);
   const label = DOC_TYPES[ex.doc_type]?.label || 'Document';

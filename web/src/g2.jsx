@@ -23,14 +23,14 @@ function Captcha({ code }) {
 function CpsLogin({ me, onOk }) {
   const gen = () => String(1000 + Math.floor(Math.random() * 9000));
   const [code, setCode] = useState(gen), [u, setU] = useState(me.username), [p, setP] = useState(''), [v, setV] = useState(''), [err, setErr] = useState('');
-  const go = (e) => { e.preventDefault(); if (!u.trim() || !p.trim()) return setErr('Please enter the user name and password.'); if (v.trim() !== code) { setCode(gen()); setV(''); return setErr('The verification code is incorrect.'); } onOk(); };
+  const go = async (e) => { e.preventDefault(); if (!u.trim() || !p.trim()) return setErr('Please enter the user name and password.'); if (v.trim() !== code) { setCode(gen()); setV(''); return setErr('The verification code is incorrect.'); } try { await api('/reauth', { password: p }); onOk(); } catch (er) { setCode(gen()); setV(''); setP(''); setErr(er.message); } };
   return <div className="cps-login-bg"><form className="cps-login" onSubmit={go}>
     <div className="cps-lt"><div className="t1">CPS</div><div className="t2">Service Provider Portal</div></div>
     <div className="cps-banner"><img src="/logo_crop.png" alt="Vodacom · M-Pesa" /><svg viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M120 190 Q 380 210 600 160 L600 260 L120 260 Z" fill="#e6e6e6" /><path d="M0 200 Q 260 180 420 120 Q 520 70 600 0 L 600 150 Q 360 220 0 200 Z" fill="#d2d2d2" /><path d="M330 120 L 380 60 L 430 125 Z" fill="#ececec" /></svg></div>
     <div className="cps-form">
       <label>Language:</label><select className="cps-in"><option>English</option><option>Français</option></select>
       <label>User Name:</label><input className="cps-in" value={u} onChange={e => setU(e.target.value)} autoCapitalize="none" />
-      <label>Password:</label><div className="row" style={{ gap: 10 }}><input className="cps-in" type="password" value={p} onChange={e => setP(e.target.value)} placeholder="your Sentinel password" /><a className="cps-link" href="#" onClick={e => { e.preventDefault(); setErr('Demo: use your Sentinel password (demo123).'); }}>Forgot password?</a></div>
+      <label>Password:</label><div className="row" style={{ gap: 10 }}><input className="cps-in" type="password" value={p} onChange={e => setP(e.target.value)} placeholder="your Sentinel password" /><a className="cps-link" href="#" onClick={e => { e.preventDefault(); setErr('Use the same password as your Sentinel sign-in.'); }}>Forgot password?</a></div>
       <label>Verification Code:</label><div className="row" style={{ gap: 8 }}><input className="cps-in" style={{ width: 170 }} value={v} onChange={e => setV(e.target.value)} /><Captcha code={code} /><button type="button" className="cps-refresh" title="Refresh" onClick={() => setCode(gen())}>⟳</button></div>
       <span /><div><button className="cps-btn" type="submit" style={{ minWidth: 128 }}>Login</button>{err && <div className="cps-err">{err}</div>}</div>
     </div>

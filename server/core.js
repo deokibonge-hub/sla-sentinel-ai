@@ -1,6 +1,7 @@
 // Clock (demo time travel), audit trail, auth/RBAC, notifications.
 import crypto from 'node:crypto';
 import { get, run, all, setting, setSetting, s } from './db.js';
+import { demoPassword, SESSION_TTL_S } from './security.js';
 
 // ---------- clock ----------
 export function now() { const off = Number(setting('clock_offset_ms', 0)) || 0; return new Date(Date.now() + off); }
@@ -87,9 +88,16 @@ export function login(username, password) {
   audit({ actor: u.name, role: u.role, action: 'User login', entity: 'user:' + u.username });
   return { token, user: publicUser(u) };
 }
+export function verifyPassword(username, password) {
+  const u = get('SELECT * FROM users WHERE username=?', username);
+  if (!u || typeof password !== 'string') return false;
+  return crypto.timingSafeEqual(Buffer.from(hashPw(password.trim(), u.salt).hash), Buffer.from(u.password_hash));
+}
 export function userFromToken(token) {
-  if (!token) return null;
-  const u = get('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?', token);
+  if (!token || !/^[a-f0-9]{48}$/.test(token)) return null;
+  const minTs = new Date(Date.now() - SESSION_TTL_S * 1000).toISOString();
+  const u = get('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.created_at>?', token, minTs);
+  if (!u) run('DELETE FROM sessions WHERE created_at<=?', minTs);
   return u ? publicUser(u) : null;
 }
 export function publicUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, roleName: ROLES[u.role]?.name, dept: ROLES[u.role]?.dept, perms: PERMS[u.role] || [] }; }
@@ -106,12 +114,13 @@ export function nextRef(prefix) {
 }
 export const rid = (n = 6) => String(Math.floor(Math.random() * 10 ** n)).padStart(n, '0');
 
-// Self-heal demo accounts at startup: every demo user exists and accepts "demo123".
+// Self-heal demo accounts at startup: every demo user exists and accepts the configured staff password (DEMO_PASSWORD).
 export function ensureDemoUsers(USERS) {
   for (const [u, n, r] of USERS) {
     const row = get('SELECT * FROM users WHERE username=?', u);
-    const ok = row && crypto.timingSafeEqual(Buffer.from(hashPw('demo123', row.salt).hash), Buffer.from(row.password_hash));
-    if (!row) { const { hash, salt } = hashPw('demo123'); run('INSERT INTO users(username,password_hash,salt,name,role) VALUES(?,?,?,?,?)', u, hash, salt, n, r); }
-    else if (!ok) { const { hash, salt } = hashPw('demo123'); run('UPDATE users SET password_hash=?, salt=? WHERE username=?', hash, salt, u); }
+    const pw = demoPassword();
+    const ok = row && crypto.timingSafeEqual(Buffer.from(hashPw(pw, row.salt).hash), Buffer.from(row.password_hash));
+    if (!row) { const { hash, salt } = hashPw(pw); run('INSERT INTO users(username,password_hash,salt,name,role) VALUES(?,?,?,?,?)', u, hash, salt, n, r); }
+    else if (!ok) { const { hash, salt } = hashPw(pw); run('UPDATE users SET password_hash=?, salt=? WHERE username=?', hash, salt, u); }
   }
 }

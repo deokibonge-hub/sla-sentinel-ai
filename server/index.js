@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { get, all, run, j, s, setting, setSetting, policy, DATA_DIR } from './db.js';
-import { login, logout, userFromToken, can, ensureDemoUsers, iso, now, audit, advanceClock, DAY, HOUR, DEPTS, DEPT_NAMES, ROLES } from './core.js';
+import { verifyPassword, login, logout, userFromToken, can, ensureDemoUsers, iso, now, audit, advanceClock, DAY, HOUR, DEPTS, DEPT_NAMES, ROLES } from './core.js';
 import * as tobi from './tobi.js';
 import { case360, waitingFor, decide, orchestrateCreation, slaInfo, refreshSla, caseAction, CASE_ACTIONS } from './cases.js';
 import { account, operate, normMsisdn, fmtMsisdn, addTx, txSummary, fraudCheck } from './g2.js';
@@ -17,6 +17,7 @@ import { bcfHtml } from './forms.js';
 import { customerRequests, SERVICES, slaLabel } from './services.js';
 import { programme, systemsOverview, recentCalls, trustOverview, setKill, AGENTS, backfillCalls } from './trust.js';
 import { sealAudit } from './core.js';
+import { securityHeaders, sessionCookie, csrfOk, rateLimited, clientIp, loginLocked, loginFailed, loginOk, DOC_CSP } from './security.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB = path.join(ROOT, 'web', 'dist');
@@ -33,7 +34,9 @@ try { if (!get('SELECT COUNT(*) n FROM integration_calls').n) backfillCalls(); c
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.pdf': 'application/pdf', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
 const send = (res, code, body, type = 'application/json') => { res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' }); res.end(type === 'application/json' ? JSON.stringify(body) : body); };
 const bad = (res, code, msg, extra = {}) => send(res, code, { error: msg, ...extra });
-async function body(req) { let b = ''; for await (const c of req) { b += c; if (b.length > 20e6) throw new Error('Payload too large'); } return b ? JSON.parse(b) : {}; }
+class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
+async function body(req) { let b = ''; for await (const c of req) { b += c; if (b.length > 20e6) throw new HttpError(413, 'Payload too large'); } if (!b) return {}; try { const v = JSON.parse(b); return v && typeof v === 'object' ? v : {}; } catch { throw new HttpError(400, 'Invalid JSON'); } }
+const docHeaders = (res, d) => { res.setHeader('Content-Security-Policy', DOC_CSP); res.setHeader('Content-Disposition', `inline; filename="${String(d.filename || 'document').replace(/[^\w.\-]/g, '_')}"`); };
 const cookie = (req, k) => (req.headers.cookie || '').split(';').map(x => x.trim().split('=')).find(([a]) => a === k)?.[1];
 
 const routes = [];
@@ -44,29 +47,33 @@ r('GET', '/api/config', null, () => ({ ai: aiEnabled(), clock: iso(), public_url
 r('POST', '/api/tobi/start', null, (q, b) => ({ token: tobi.startConversation({}) }));
 r('GET', '/api/tobi/:token', null, (q) => tobi.getConversation(q.p.token, Number(q.url.searchParams.get('since') || 0)));
 r('POST', '/api/tobi/:token/message', null, async (q, b) => { await tobi.handleText(q.p.token, b.text); return tobi.getConversation(q.p.token, Number(b.since || 0)); });
-r('POST', '/api/tobi/:token/upload', null, async (q, b) => { await tobi.handleUpload(q.p.token, b); return tobi.getConversation(q.p.token, Number(b.since || 0)); });
+r('POST', '/api/tobi/:token/upload', null, async (q, b, res) => { try { await tobi.handleUpload(q.p.token, b); } catch (e) { return bad(res, 400, /accepted|too large/i.test(e.message) ? e.message : 'This file could not be processed.'); } return tobi.getConversation(q.p.token, Number(b.since || 0)); });
 r('POST', '/api/tobi/:token/action', null, async (q, b) => { const out = await tobi.handleAction(q.p.token, b); return { ...tobi.getConversation(q.p.token, Number(b.since || 0)), result: out || null }; });
 r('GET', '/api/tobi/:token/requests', null, (q, b, res) => { const conv = get('SELECT * FROM conversations WHERE token=?', q.p.token); if (!conv) return bad(res, 404, 'Not found'); return customerRequests(conv); });
-r('GET', '/api/tobi/:token/form', null, (q, b, res) => { const conv = get('SELECT application_id FROM conversations WHERE token=?', q.p.token); const app = conv && get('SELECT id, status FROM applications WHERE id=?', conv.application_id); if (!app || app.status === 'DRAFT') return send(res, 404, '<p>Form available after submission.</p>', 'text/html'); return send(res, 200, bcfHtml(app.id), 'text/html; charset=utf-8'); });
+r('GET', '/api/tobi/:token/form', null, (q, b, res) => { const conv = get('SELECT application_id FROM conversations WHERE token=?', q.p.token); const app = conv && get('SELECT id, status FROM applications WHERE id=?', conv.application_id); if (!app || app.status === 'DRAFT') return send(res, 404, '<p>Form available after submission.</p>', 'text/html'); res.setHeader('Content-Security-Policy', DOC_CSP); return send(res, 200, bcfHtml(app.id), 'text/html; charset=utf-8'); });
 r('GET', '/api/services', null, () => Object.entries(SERVICES).map(([code, v]) => ({ code, label: v.label, sla: slaLabel(v.sla), team: v.team, group: v.group })));
-r('GET', '/api/qr', null, (q, b, res) => send(res, 200, qrSvg(q.url.searchParams.get('text') || 'https://vodacom.cd', { scale: 10 }), 'image/svg+xml'));
+r('GET', '/api/qr', null, (q, b, res) => send(res, 200, qrSvg(String(q.url.searchParams.get('text') || 'https://vodacom.cd').slice(0, 300), { scale: 10 }), 'image/svg+xml'));
 r('GET', '/api/tobi/:token/doc/:id', null, (q, b, res) => {
   const conv = get('SELECT application_id FROM conversations WHERE token=?', q.p.token);
   const d = conv && get('SELECT * FROM documents WHERE id=? AND application_id=?', q.p.id, conv.application_id);
   if (!d) return bad(res, 404, 'Not found');
-  return send(res, 200, fs.readFileSync(path.join(DATA_DIR, 'uploads', d.path)), d.mime || 'application/octet-stream');
+  docHeaders(res, d); return send(res, 200, fs.readFileSync(path.join(DATA_DIR, 'uploads', path.basename(d.path))), d.mime || 'application/octet-stream');
 });
 
 // ---------- auth ----------
 r('POST', '/api/login', null, (q, b, res) => {
-  const out = login(b.username, b.password);
-  if (!out) return bad(res, 401, 'Wrong username or password. Use a demo username (admin, ops, opsmanager, aml, compliance, risk, control, legal, audit) with password demo123 — or click a role below.');
-  res.setHeader('set-cookie', `sid=${out.token}; Path=/; HttpOnly; SameSite=Lax`);
-  return out;
+  const ip = clientIp(q.req), user = String(b.username || '').trim().toLowerCase().slice(0, 64);
+  if (loginLocked('ip:' + ip, 'u:' + user)) return bad(res, 429, 'Too many failed attempts. Try again in 15 minutes.');
+  const out = typeof b.password === 'string' && b.password.length <= 128 ? login(user, b.password) : null;
+  if (!out) { loginFailed('ip:' + ip, 'u:' + user); audit({ actor: 'Unknown', role: 'ANONYMOUS', action: 'Failed login', entity: 'user:' + user.replace(/[^\w.@-]/g, '').slice(0, 40), rule: 'AUTH_FAILURE' }); return bad(res, 401, 'Wrong username or password.'); }
+  loginOk('ip:' + ip, 'u:' + user);
+  res.setHeader('set-cookie', sessionCookie(q.req, out.token));
+  return { user: out.user };
 });
-r('POST', '/api/logout', null, (q, b, res) => { logout(cookie(q.req, 'sid')); res.setHeader('set-cookie', 'sid=; Path=/; Max-Age=0'); return { ok: true }; });
+r('POST', '/api/logout', null, (q, b, res) => { logout(cookie(q.req, 'sid')); res.setHeader('set-cookie', sessionCookie(q.req, '', 0)); return { ok: true }; });
 r('GET', '/api/me', 'auth', (q) => q.user);
-r('GET', '/api/users/demo', null, () => all('SELECT username, name, role FROM users ORDER BY id').map(u => ({ ...u, roleName: ROLES[u.role]?.name, password: 'demo123' })));
+r('POST', '/api/reauth', 'auth', (q, b, res) => { const k = 'u:' + q.user.username; if (loginLocked(k)) return bad(res, 429, 'Too many failed attempts. Try again in 15 minutes.'); if (!verifyPassword(q.user.username, b.password)) { loginFailed(k, 'ip:' + clientIp(q.req)); audit({ actor: q.user.name, role: q.user.role, system: 'G2', action: 'G2 re-authentication failed', rule: 'AUTH_FAILURE' }); return bad(res, 401, 'Wrong password.'); } audit({ actor: q.user.name, role: q.user.role, system: 'G2', action: 'G2 session opened (re-authenticated)' }); return { ok: true }; });
+r('GET', '/api/users/demo', null, () => all('SELECT username, name, role FROM users ORDER BY id').map(u => ({ ...u, roleName: ROLES[u.role]?.name })));
 
 // ---------- dashboard ----------
 function kpis(dept = null) {
@@ -172,8 +179,8 @@ r('POST', '/api/cases/:ref/action', 'auth', (q, b, res) => {
 });
 r('GET', '/api/case-actions', 'auth', (q) => Object.entries(CASE_ACTIONS).filter(([, d]) => can(q.user, d.perm)).map(([k, d]) => ({ action: k, ...d })));
 r('POST', '/api/cases/:ref/retry-g2', 'g2.create', (q, b, res) => { const c = get('SELECT id,status FROM cases WHERE ref=?', q.p.ref); if (!c || c.status !== 'G2_FAILED') return bad(res, 400, 'Nothing to retry'); audit({ actor: q.user.name, role: q.user.role, action: 'Retry G2 creation', case_ref: q.p.ref }); return orchestrateCreation(c.id, q.user.name); });
-r('GET', '/api/forms/bcf/:ref', 'case.view', (q, b, res) => { const c = get('SELECT application_id FROM cases WHERE ref=?', q.p.ref); if (!c?.application_id) return send(res, 404, '<p>No merchant form for this case.</p>', 'text/html'); audit({ actor: q.user.name, role: q.user.role, action: 'Merchant form printed', case_ref: q.p.ref }); return send(res, 200, bcfHtml(c.application_id), 'text/html; charset=utf-8'); });
-r('GET', '/api/documents/:id/file', 'case.view', (q, b, res) => { const d = get('SELECT * FROM documents WHERE id=?', q.p.id); if (!d) return bad(res, 404, 'Not found'); return send(res, 200, fs.readFileSync(path.join(DATA_DIR, 'uploads', d.path)), d.mime || 'application/octet-stream'); });
+r('GET', '/api/forms/bcf/:ref', 'case.view', (q, b, res) => { const c = get('SELECT application_id FROM cases WHERE ref=?', q.p.ref); if (!c?.application_id) return send(res, 404, '<p>No merchant form for this case.</p>', 'text/html'); audit({ actor: q.user.name, role: q.user.role, action: 'Merchant form printed', case_ref: q.p.ref }); res.setHeader('Content-Security-Policy', DOC_CSP); return send(res, 200, bcfHtml(c.application_id), 'text/html; charset=utf-8'); });
+r('GET', '/api/documents/:id/file', 'case.view', (q, b, res) => { const d = get('SELECT * FROM documents WHERE id=?', q.p.id); if (!d) return bad(res, 404, 'Not found'); docHeaders(res, d); return send(res, 200, fs.readFileSync(path.join(DATA_DIR, 'uploads', path.basename(d.path))), d.mime || 'application/octet-stream'); });
 r('GET', '/api/workbench', 'auth', (q) => {
   const u = q.user, dept = u.dept;
   const cases = (dept === 'AUDIT' || dept === 'ADMIN') ? all("SELECT * FROM cases WHERE status NOT IN ('RESOLVED','REJECTED','CLOSED') ORDER BY sla_due LIMIT 60") : all("SELECT * FROM cases WHERE owner_dept=? AND status NOT IN ('RESOLVED','REJECTED','CLOSED') ORDER BY sla_due LIMIT 60", dept);
@@ -253,8 +260,14 @@ r('POST', '/api/demo/reset', 'demo.control', () => { seed(true); setSetting('see
 // ---------- server ----------
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
+  securityHeaders(req, res);
   try {
     if (url.pathname.startsWith('/api/')) {
+      const ip = clientIp(req);
+      if (rateLimited('api:' + ip, 900, 60e3)) return bad(res, 429, 'Too many requests — slow down.');
+      if (req.method === 'POST' && /^\/api\/(tobi\/start|login)$/.test(url.pathname) && rateLimited('burst:' + url.pathname + ip, 30, 60e3)) return bad(res, 429, 'Too many requests — slow down.');
+      if (/\/upload$/.test(url.pathname) && rateLimited('up:' + ip, 40, 60e3)) return bad(res, 429, 'Too many uploads — slow down.');
+      if (!csrfOk(req)) return bad(res, 403, 'Request blocked (cross-site or wrong content type).');
       for (const rt of routes) {
         if (rt.method !== req.method) continue;
         const m = url.pathname.match(rt.re); if (!m) continue;
@@ -273,7 +286,7 @@ const server = http.createServer(async (req, res) => {
     if (!fp.startsWith(WEB) || !fs.existsSync(fp) || fs.statSync(fp).isDirectory()) fp = path.join(WEB, 'index.html');
     res.writeHead(200, { 'content-type': MIME[path.extname(fp)] || 'application/octet-stream' });
     fs.createReadStream(fp).pipe(res);
-  } catch (e) { console.error(e); if (!res.writableEnded) bad(res, 500, e.message); }
+  } catch (e) { if (e instanceof HttpError) { if (!res.writableEnded) bad(res, e.code, e.message); return; } console.error(e); if (!res.writableEnded) bad(res, 500, 'Internal error — the incident was logged.'); }
 });
 setInterval(() => { try { tick(); } catch (e) { console.error('tick', e.message); } }, 60000);
 server.listen(PORT, () => console.log(`SLA Sentinel AI running on http://localhost:${PORT}  (AI mode: ${aiEnabled() ? 'ON' : 'OFF — demo rules'})`));

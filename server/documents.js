@@ -1,4 +1,5 @@
 // Document Intelligence Service: upload storage, extraction (AI vision or OCR/rules), field mapping.
+import { sniffMime } from './security.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -9,9 +10,13 @@ import { DOC_TYPES } from './schema.js';
 import { ocrFile, parseDocument, locateFields } from './docintel.js';
 
 export function saveUpload({ application_id, filename, mime, data, doc_type = null }) {
-  const buf = Buffer.from(data, 'base64');
+  const buf = Buffer.from(String(data || ''), 'base64');
   if (buf.length > 12 * 1024 * 1024) throw new Error('File too large (max 12 MB)');
-  const safe = String(filename || 'document').replace(/[^\w.\-]+/g, '_').slice(-80);
+  const real = sniffMime(buf);   // the bytes decide, not the file name or the declared type
+  if (!real) throw new Error('Only photos (JPG, PNG, WebP) or PDF documents are accepted.');
+  mime = real;
+  const ext = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif', 'application/pdf': '.pdf' }[real];
+  const safe = String(filename || 'document').replace(/[^\w.\-]+/g, '_').replace(/\.[^.]*$/, '').slice(-70) + ext;
   const name = `${Date.now()}_${safe}`;
   const p = path.join(DATA_DIR, 'uploads', name);
   fs.writeFileSync(p, buf);

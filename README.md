@@ -62,7 +62,7 @@ The image includes Tesseract OCR and Poppler. Data (SQLite DB + uploaded documen
 
 > Never commit the API key. Put it in `.env` on the server (see `.env.example`).
 
-## 2. Demo accounts (password `demo123`)
+## 2. Demo accounts (password = the `DEMO_PASSWORD` environment variable, min. 12 characters)
 
 | Username | Role | Can |
 |---|---|---|
