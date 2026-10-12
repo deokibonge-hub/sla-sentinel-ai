@@ -1,0 +1,10 @@
+{
+  "name": "sla-sentinel-ai",
+  "version": "1.0.0",
+  "description": "SLA Sentinel AI — Seamless Lifecycle Assistance (M-Pesa DRC hackathon prototype)",
+  "type": "module",
+  "private": true,
+  "scripts": { "start": "node --no-warnings server/index.js", "build": "node web/build.mjs", "reset": "rm -rf data" },
+  "engines": { "node": ">=22.13" },
+  "devDependencies": { "esbuild": "^0.25.0", "react": "^19.0.0", "react-dom": "^19.0.0" }
+}

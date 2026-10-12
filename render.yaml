@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: sla-sentinel-ai
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/config
+    envVars:
+      - key: DATA_DIR
+        value: /app/data
+      # Optional: add ANTHROPIC_API_KEY in the Render dashboard to enable AI mode
