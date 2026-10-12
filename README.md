@@ -2,6 +2,10 @@
 
 *From reactive servicing to proactive lifecycle management.*
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/deokibonge-hub/sla-sentinel-ai)
+
+Try it: open `/scan` on the deployed site for the QR code to TOBi.
+
 Functional hackathon prototype for **M-Pesa DRC (Vodacash)**. One server, one database, five connected experiences:
 
 | Experience | URL | Who |
