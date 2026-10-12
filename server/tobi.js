@@ -1,5 +1,6 @@
 // TOBi — conversational onboarding & lifecycle assistant (ConversationAIService + IntentClassificationService).
 // State-driven: knows what is collected, missing, documented, conflicting. AI MODE (Claude) or DEMO MODE (rules).
+import { screenInput, callSystem } from './trust.js';
 import crypto from 'node:crypto';
 import { get, all, run, s, j } from './db.js';
 import { iso, now, audit, notify } from './core.js';
@@ -251,6 +252,7 @@ function setField(ctx, key, value, source) {
     return 'same';
   }
   ctx.fields[key] = value; ctx.sources[key] = source;
+  if (key === 'phone' && !ctx.state.otp_ok) { ctx.state.otp_ok = true; callSystem('GATEWAY', 'otp.verify', { identity: 'gateway', detail: 'conv:' + ctx.conv.id }); say(ctx.conv.id, `🔐 Secure check: I sent a one-time code to ${value} and it was confirmed on this device.`, 'card', { title: 'SECURE ENTRY · Number verified', pillar: 'SECURE', rows: [['Number', value], ['Method', 'One-time code (SMS)'], ['Session', 'Bound to this device · encrypted (TLS 1.3)'], ['Status', 'Verified ✓']] }); }
   return 'set';
 }
 
@@ -364,6 +366,7 @@ export async function handleText(token, text) {
   text = String(text || '').slice(0, 1000);
   if (!text.trim()) return;
   userSay(ctx.conv.id, text);
+  if (screenInput(text, ctx.conv.id).blocked) { say(ctx.conv.id, "I can't do that 🔒 I only help with your M-Pesa requests, and I can't change rules or approve anything myself. What do you need today?", 'options', { options: MENU }); return save(ctx); }
   if (ctx.state.svc) {
     const r = detectService(text);
     if (r && !['REQUESTS', 'FORM'].includes(r) && !/^(submit|cancel)/i.test(text) && !(ctx.state.svc.pending && SFIELDS[ctx.state.svc.pending]?.options)) { ctx.state.svc = null; route(ctx, text); return save(ctx); }

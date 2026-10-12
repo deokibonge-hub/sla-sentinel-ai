@@ -1,3 +1,4 @@
+import { CaseTrace } from './trust.jsx';
 import React, { useEffect, useState, useRef } from 'react';
 import { api, Link, useApi, Pill, Why, Modal, fmtTime, dur, DEPT_NAMES, useToast } from './lib.jsx';
 
@@ -16,7 +17,7 @@ export default function Case360({ refId, me }) {
   const stageIdx = d.pipeline.indexOf(c.stage);
   const remaining = d.sla ? d.sla.remaining_ms - (c.resolved_at ? 0 : (now - Date.now() + (now - now))) : 0;
   const closed = ['RESOLVED', 'REJECTED', 'CLOSED'].includes(c.status);
-  const TABS = ['OVERVIEW', 'CASE FILE', 'CUSTOMER', 'VERIFICATION', 'RISK', 'CONTROLS', 'AML', 'SLA', 'DECISIONS', 'ACTIVITY', 'AUDIT TRAIL'];
+  const TABS = ['OVERVIEW', 'ORCHESTRATION', 'CASE FILE', 'CUSTOMER', 'VERIFICATION', 'RISK', 'CONTROLS', 'AML', 'SLA', 'DECISIONS', 'ACTIVITY', 'AUDIT TRAIL'];
   const retry = async () => { try { await api(`/cases/${c.ref}/retry-g2`, {}); toast('G2 creation re-submitted'); load(); } catch (e) { toast(e.message, true); } };
   return <>
     <div className="card pad">
@@ -67,6 +68,7 @@ export default function Case360({ refId, me }) {
       </div></div>
     </div>}
 
+    {tab === 'ORCHESTRATION' && <CaseTrace steps={d.trace} />}
     {tab === 'CASE FILE' && <CaseFile d={d} focus={focus} />}
 
     {tab === 'CUSTOMER' && <div className="card pad"><div className="kv">{d.application ? Object.entries(f).map(([k, v]) => <React.Fragment key={k}><div className="k">{k.replace(/_/g, ' ')}</div><div>{String(v)} {String(d.application.field_sources[k] || '').startsWith('document') && <Pill v="OK">FROM DOCUMENT</Pill>}{d.application.field_sources[k + '__clarified'] && <Pill v="CLARIFIED">CLARIFIED</Pill>}</div></React.Fragment>) : (d.details?.fields ? Object.entries(d.details.fields).map(([k, v]) => <React.Fragment key={k}><div className="k">{k.replace(/_/g, ' ')}</div><div>{String(v)}</div></React.Fragment>) : <div className="mut">No declared data — system-generated case.</div>)}</div>{d.application && <div className="small mut" style={{ marginTop: 12 }}>Fields marked FROM DOCUMENT were read by Document Intelligence; the rest were typed by the customer in TOBi.</div>}</div>}

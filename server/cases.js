@@ -8,6 +8,7 @@ import { raise, resolveAlerts } from './alerts.js';
 import { tobiSay, convForApplication } from './tobi_out.js';
 import { scheduleLifecycle, titleName } from './lifecycle.js';
 import { SERVICES, slaLabel } from './services.js';
+import { callSystem, killed, caseTrace } from './trust.js';
 
 export const PIPELINE = ['UNDERSTAND', 'VERIFY', 'RISK_SCORE', 'DECIDE', 'ORCHESTRATE', 'MONITOR', 'PREDICT', 'RESOLVE', 'LEARN'];
 export const level = (x) => x >= 80 ? 'CRITICAL' : x >= 60 ? 'HIGH' : x >= 30 ? 'MEDIUM' : 'LOW';
@@ -111,6 +112,8 @@ export function submitApplication(app_id) {
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, ref, 'MERCHANT_ONBOARDING', app.id, normMsisdn(fields.phone), fields.trading_name || fields.legal_name, 'SUBMITTED', 'UNDERSTAND', rec.route,
     risk.level === 'LOW' ? 'NORMAL' : risk.level === 'MEDIUM' ? 'HIGH' : 'URGENT', risk.overall, risk.level, hours, t0.toISOString(), new Date(+t0 + hours * HOUR).toISOString(), 'ON_TRACK', s(rec), 'TOBi', iso(), iso());
   const case_id = r.lastInsertRowid;
+  callSystem('IRM', 'kyc.lookup', { case_ref: ref, identity: 'svc-sentinel-ai', tier: 'LOW', detail: `${verifs.length} checks` });
+  callSystem('CONTROL', 'aml.screening', { case_ref: ref, identity: 'svc-sentinel-ai', detail: `sanctions/PEP · risk ${risk.overall}` });
   run('UPDATE cases SET service=?, team=?, conv_id=?, requester_type=? WHERE id=?', 'MERCHANT_CREATION', SERVICES.MERCHANT_CREATION.team, app.conv_id, 'Merchant', case_id);
   for (const [d, v] of Object.entries(risk.dims)) run('INSERT INTO risk_assessments(case_id,dimension,score,level,factors,created_at,confidence) VALUES(?,?,?,?,?,?,?)', case_id, d, v.score, v.level, s(v.factors), iso(), v.confidence);
   run('INSERT INTO risk_assessments(case_id,dimension,score,level,factors,created_at) VALUES(?,?,?,?,?,?)', case_id, 'OVERALL', risk.overall, risk.level, s([]), iso());
@@ -139,6 +142,7 @@ export function submitApplication(app_id) {
     return get('SELECT * FROM cases WHERE id=?', case_id);
   }
 
+  if (rec.automation && killed('BOT_G2')) { rec.automation = false; rec.rule += ' — G2 robot kill switch engaged → human'; run('UPDATE cases SET recommendation=? WHERE id=?', s(rec), case_id); audit({ action: 'Automation blocked: kill switch engaged', case_ref: ref, rule: 'FAIL_SECURE' }); }
   if (rec.automation) {
     audit({ action: 'Straight-through processing authorised by policy', case_ref: ref, rule: rec.rule, ai: 'AUTO_PROCESS', new_state: 'APPROVED' });
     run('INSERT INTO decisions(case_id,actor,role,action,ai_action,override,reason,created_at) VALUES(?,?,?,?,?,?,?,?)', case_id, 'Sentinel AI (policy STP)', 'SYSTEM', 'APPROVE', rec.action, 0, rec.rule, iso());
@@ -164,6 +168,7 @@ export function orchestrateCreation(case_id, actor) {
   run("UPDATE cases SET stage='ORCHESTRATE', status='CREATING', updated_at=? WHERE id=?", iso(), case_id);
   const res = createAccount({ case_ref: c.ref, type: 'MERCHANT', fields, documents: appDocuments(app.id) });
   const conv = convForApplication(app.id);
+  callSystem('G2', 'account.create', { case_ref: c.ref, status: res.ok ? 'OK' : 'ERROR', detail: res.ok ? res.merchant_id : res.error });
   if (!res.ok) {
     run("UPDATE cases SET status='G2_FAILED', stage='ORCHESTRATE', owner_dept='OPERATIONS', updated_at=? WHERE id=?", iso(), case_id);
     raise({ dept: 'OPERATIONS', type: 'G2_FAILURE', severity: 'HIGH', title: `${c.ref}: G2 creation failed`, detail: res.error, why: [{ points: 50, label: res.error }], recommendation: 'Retry creation from Case 360', case_ref: c.ref, rule: 'G2_FAILURE' });
@@ -171,6 +176,7 @@ export function orchestrateCreation(case_id, actor) {
     return { ok: false, error: res.error };
   }
   run("UPDATE cases SET status='RESOLVED', stage='MONITOR', resolved_at=?, account_msisdn=?, updated_at=? WHERE id=?", iso(), res.msisdn, iso(), case_id);
+  callSystem('ICAP', 'sim.connect', { case_ref: c.ref, detail: 'merchant SIM ' + res.merchant_sim }); callSystem('IRM', 'kyc.register', { case_ref: c.ref }); callSystem('TRANSACTIONAL', 'till.activate', { case_ref: c.ref, detail: 'till ' + res.till_number }); callSystem('CONTROL', 'evidence.push', { case_ref: c.ref });
   const c2 = refreshSla(get('SELECT * FROM cases WHERE id=?', case_id));
   run("UPDATE applications SET status='ACTIVE', updated_at=? WHERE id=?", iso(), app.id);
   resolveAlerts({ case_ref: c.ref }, actor, 'Case resolved');
@@ -202,6 +208,7 @@ export function decide(case_ref, user, action, reason = '') {
   // department authority
   if (action === 'APPROVE' && c.owner_dept === 'AML' && user.role !== 'AML_OFFICER') throw new Error('Only AML/CFT can approve a case under AML review');
   run('INSERT INTO decisions(case_id,actor,role,action,ai_action,override,reason,created_at) VALUES(?,?,?,?,?,?,?,?)', c.id, user.name, user.role, action, aiAct, override ? 1 : 0, reason, iso());
+  callSystem('CONTROL', 'maker_checker.evidence', { case_ref, identity: 'staff:' + user.role, detail: action });
   audit({ actor: user.name, role: user.role, action: `Human decision: ${action.replace(/_/g, ' ')}`, case_ref, prev_state: c.status, ai: aiAct, human: action, override, override_reason: override ? reason : null, risk: c.risk_score });
   if (override) raise({ dept: 'AUDIT', type: 'OVERRIDE', severity: 'LOW', title: `${case_ref}: AI recommendation overridden`, detail: `${user.name} (${user.roleName}) chose ${action} vs Sentinel ${aiAct}. Reason: ${reason}`, why: [{ points: 20, label: 'Human override of AI recommendation' }], case_ref, rule: 'OVERRIDE_' + c.id });
   const conv = c.application_id ? convForApplication(c.application_id) : null;
@@ -305,7 +312,8 @@ export function case360(ref) {
   const verifs = app ? all('SELECT * FROM verifications WHERE application_id=? ORDER BY id', app.id) : (details?.checks || []).map((x, i) => ({ id: i + 1, check_code: x.code, label: x.label, status: CHECK_STATUS(x), declared: x.declared ?? null, found: x.found ?? null, detail: x.detail ?? null, source: x.doc_id ? 'document:' + x.doc_id : null }));
   const documents = caseDocuments(c, app);
   const findings = annotate(documents, app ? verifs : [], app ? [] : (details?.checks || []));
-  return {
+  const trace = caseTrace(c);
+  return { trace,
     case: { ...c, recommendation: j(c.recommendation, {}) }, sla: slaInfo(c), pipeline: PIPELINE,
     application: app ? { ...app, fields, field_sources: j(app.field_sources, {}) } : null,
     documents, findings, waiting: waitingFor(c, j(c.recommendation, {})),

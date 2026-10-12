@@ -1,4 +1,5 @@
 // Realistic FICTIONAL demo data. No real customer data.
+import { backfillCalls } from './trust.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { run, get, all, s, wipe, setSetting, DATA_DIR, db } from './db.js';
@@ -25,7 +26,7 @@ const msisdn = () => '243' + pick(['81', '82', '83', '97', '99', '84', '85']) + 
 export function seed(reset = false) {
   if (reset) wipe();
   db.exec('BEGIN');
-  try { seedInner(); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; }
+  try { seedInner(); run('DELETE FROM integration_calls'); backfillCalls(); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 function seedInner() {
   seedN = 20261008;

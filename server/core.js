@@ -14,6 +14,25 @@ export function audit(e) {
        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     iso(), e.actor || 'Sentinel AI', e.role || 'SYSTEM', e.system || 'SENTINEL', e.action, e.case_ref || null, e.entity || null,
     e.prev_state || null, e.new_state || null, e.ai || null, e.human || null, e.risk ?? null, e.rule || null, e.override ? 1 : 0, e.override_reason || null, s(e.evidence || null));
+  sealAudit();
+}
+// Tamper-evident audit trail: each event stores sha256(previous hash + its own content).
+const AUDIT_COLS = ['ts', 'actor', 'role', 'system', 'action', 'case_ref', 'entity', 'prev_state', 'new_state', 'ai_recommendation', 'human_decision', 'risk_score', 'rule', 'override', 'override_reason', 'evidence'];
+export const auditHash = (prev, row) => crypto.createHash('sha256').update((prev || 'GENESIS') + '|' + AUDIT_COLS.map(c => row[c] ?? '').join('|')).digest('hex');
+export function sealAudit() {
+  const rows = all('SELECT * FROM audit_events WHERE hash IS NULL ORDER BY id');
+  if (!rows.length) return 0;
+  let prev = get('SELECT hash FROM audit_events WHERE hash IS NOT NULL AND id < ? ORDER BY id DESC LIMIT 1', rows[0].id)?.hash || null;
+  for (const r of rows) { const h = auditHash(prev, r); run('UPDATE audit_events SET prev_hash=?, hash=? WHERE id=?', prev, h, r.id); prev = h; }
+  return rows.length;
+}
+export function verifyAudit() {
+  let prev = null, n = 0;
+  for (const r of all('SELECT * FROM audit_events ORDER BY id')) {
+    if (r.prev_hash !== prev || auditHash(prev, r) !== r.hash) return { ok: false, checked: n, broken_at: r.id };
+    prev = r.hash; n++;
+  }
+  return { ok: true, checked: n, head: prev };
 }
 
 // ---------- notifications ----------

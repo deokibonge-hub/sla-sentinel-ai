@@ -5,7 +5,7 @@ import { api, nav, Link, useApi, useSearch, Pill, Dot, Why, Modal, Logo, Spark, 
 export function Shell({ me, path, children, onLogout }) {
   const [cfg] = useApi('/config', [path], 15000);
   const off = cfg?.demo_offset_days || 0;
-  const items = [['/', '📊', 'Command Center'], ['/work', '🗂️', 'My Work'], ['/cases?open=1', '📁', 'Cases'], ['/g2', '🖥️', 'G2 System'], ['/audit', '🧾', 'Audit Trail'], ['/policies', '⚙️', 'Policy Engine']];
+  const items = [['/', '📊', 'Command Center'], ['/work', '🗂️', 'My Work'], ['/cases?open=1', '📁', 'Cases'], ['/g2', '🖥️', 'G2 System'], ['/audit', '🧾', 'Audit Trail'], ['/policies', '⚙️', 'Policy Engine'], ['/programme', '🇨🇩', 'DRC Pilot'], ['/systems', '🔌', 'Connected Systems'], ['/security', '🔒', 'Security & Trust']];
   if (me.perms.includes('demo.control')) items.push(['/demo', '⏱️', 'Demo Control']);
   return <div className="shell">
     <aside className="side">

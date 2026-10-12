@@ -5,6 +5,7 @@ import { api, nav, usePath, ToastHost } from './lib.jsx';
 import Tobi from './tobi.jsx';
 import Case360 from './case.jsx';
 import G2 from './g2.jsx';
+import { Programme, Systems, Security } from './trust.jsx';
 import { Shell, Login, Command, Workbench, Cases, Audit, Policies, Demo, QR, Scan } from './staff.jsx';
 
 function App() {
@@ -24,6 +25,9 @@ function App() {
   else if (path.startsWith('/case/')) page = <Case360 refId={decodeURIComponent(path.slice(6))} me={me} />;
   else if (path === '/audit') page = <Audit me={me} />;
   else if (path === '/policies') page = <Policies me={me} />;
+  else if (path === '/programme') page = <Programme />;
+  else if (path === '/systems') page = <Systems />;
+  else if (path === '/security') page = <Security me={me} />;
   else if (path === '/demo') page = <Demo />;
   else if (path === '/qr') page = <QR />;
   else page = <div className="card pad">Page not found.</div>;

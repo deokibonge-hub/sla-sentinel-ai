@@ -15,6 +15,8 @@ import { aiEnabled } from './ai.js';
 import { seed, USERS } from './seed.js';
 import { bcfHtml } from './forms.js';
 import { customerRequests, SERVICES, slaLabel } from './services.js';
+import { programme, systemsOverview, recentCalls, trustOverview, setKill, AGENTS, backfillCalls } from './trust.js';
+import { sealAudit } from './core.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB = path.join(ROOT, 'web', 'dist');
@@ -22,10 +24,11 @@ const PORT = Number(process.env.PORT || 3000);
 // load .env if present
 try { for (const l of fs.readFileSync(path.join(ROOT, '.env'), 'utf8').split('\n')) { const m = l.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, ''); } } catch { }
 
-const SEED_VERSION = '3.1.1-dossiers';
+const SEED_VERSION = '3.2-trust';
 if (!get('SELECT 1 FROM users LIMIT 1')) { console.log('Seeding demo data…'); seed(); setSetting('seed_version', SEED_VERSION); }
 else if (setting('seed_version') !== SEED_VERSION) { console.log('Demo data from an older version — re-seeding with complete case files…'); seed(true); setSetting('seed_version', SEED_VERSION); }
 try { ensureDemoUsers(USERS); } catch (e) { console.warn('Demo users check failed:', e.message); }
+try { if (!get('SELECT COUNT(*) n FROM integration_calls').n) backfillCalls(); const n = sealAudit(); if (n) console.log(`Audit trail sealed: ${n} events hash-chained`); } catch (e) { console.warn('Trust layer init failed:', e.message); }
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.pdf': 'application/pdf', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
 const send = (res, code, body, type = 'application/json') => { res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' }); res.end(type === 'application/json' ? JSON.stringify(body) : body); };
@@ -226,6 +229,12 @@ r('GET', '/api/contracts', 'dashboard.view', () => all('SELECT * FROM contracts 
 r('GET', '/api/policies', 'dashboard.view', () => all('SELECT * FROM policies ORDER BY category, key').map(p => ({ ...p, value: j(p.value) })));
 r('PUT', '/api/policies/:key', 'policy.manage', (q, b, res) => { const p = get('SELECT * FROM policies WHERE key=?', q.p.key); if (!p) return bad(res, 404, 'Unknown policy'); run('UPDATE policies SET value=?, version=version+1, updated_by=?, updated_at=? WHERE key=?', s(b.value), q.user.name, iso(), q.p.key); audit({ actor: q.user.name, role: q.user.role, action: 'Policy updated', entity: 'policy:' + q.p.key, prev_state: p.value, new_state: s(b.value) }); return { ok: true }; });
 
+// ---------- programme, connected systems, security & trust ----------
+r('GET', '/api/programme', 'dashboard.view', () => programme());
+r('GET', '/api/systems', 'dashboard.view', () => ({ systems: systemsOverview(), calls: recentCalls(30) }));
+r('GET', '/api/trust', 'dashboard.view', () => trustOverview());
+r('POST', '/api/trust/kill', 'policy.manage', (q, b, res) => { if (!AGENTS.some(([k]) => k === b.key)) return bad(res, 400, 'Unknown agent'); setKill(b.key, !!b.on, q.user); return { ok: true }; });
+
 // ---------- demo control ----------
 r('GET', '/api/demo/state', 'demo.control', () => ({ offset_days: Math.round((Number(setting('clock_offset_ms', 0)) || 0) / DAY * 10) / 10, clock: iso(), g2_fail_next: !!setting('g2_fail_next', false), ai: aiEnabled() }));
 r('POST', '/api/demo/advance', 'demo.control', (q, b) => { const from = +now(); advanceClock((Number(b.days) || 0) * DAY + (Number(b.hours) || 0) * HOUR); audit({ actor: q.user.name, role: q.user.role, system: 'DEMO', action: `Time advanced +${b.days || 0}d ${b.hours || 0}h` }); tick(from); return { ok: true, clock: iso() }; });
@@ -236,6 +245,7 @@ r('POST', '/api/demo/simulate', 'demo.control', (q, b, res) => {
   if (k === 'AML_ALERT') { const a = get("SELECT * FROM g2_accounts WHERE status='ACTIVE' AND account_type='CUSTOMER' ORDER BY RANDOM()"); operate(a.msisdn, 'SIM_SWAP', { operator: 'Agent shop #4412', role: 'G2' , case_ref: 'MP-SUP-SIM-' + Math.floor(Math.random() * 9999) }); operate(a.msisdn, 'PIN_RESET', { operator: 'Agent shop #4412', role: 'G2', case_ref: 'MP-SUP-PIN-' + Math.floor(Math.random() * 9999) }); addTx(a.msisdn, 'CASH_OUT', 1450, 'Agent 4412 — Kinshasa/Limete'); fraudCheck(a.msisdn); return { ok: true, msisdn: a.msisdn }; }
   if (k === 'CONTROL_EXCEPTION') { const a = get("SELECT * FROM g2_accounts WHERE status='ACTIVE' AND account_type='MERCHANT' ORDER BY RANDOM()"); operate(a.msisdn, 'SIM_SWAP', { operator: 'backoffice.user7', role: 'OPS_AGENT' }); return { ok: true, msisdn: a.msisdn }; }
   if (k === 'TICK') { tick(); return { ok: true }; }
+  if (k === 'KYC_EXPIRY') { const m = normMsisdn(b.msisdn || ''); const d = get("SELECT id FROM documents WHERE account_msisdn=? AND doc_type='NATIONAL_ID' AND replaced_by IS NULL ORDER BY id DESC", m); if (!d) return bad(res, 400, 'No ID document on this account'); run('UPDATE documents SET expiry_date=? WHERE id=?', new Date(+now() + 30 * DAY - HOUR).toISOString().slice(0, 10), d.id); audit({ ...who, action: 'ID expiry brought forward for demo', entity: 'account:' + m }); tick(); return { ok: true }; }
   return bad(res, 400, 'Unknown simulation');
 });
 r('POST', '/api/demo/reset', 'demo.control', () => { seed(true); setSetting('seed_version', SEED_VERSION); return { ok: true }; });

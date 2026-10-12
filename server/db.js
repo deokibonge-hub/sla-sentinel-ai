@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS g2_operations (id INTEGER PRIMARY KEY, msisdn TEXT, o
 CREATE TABLE IF NOT EXISTS g2_requests (id INTEGER PRIMARY KEY, case_ref TEXT, payload TEXT, status TEXT, response TEXT, created_at TEXT, completed_at TEXT);
 CREATE TABLE IF NOT EXISTS lifecycle_actions (id INTEGER PRIMARY KEY, msisdn TEXT, conv_id INTEGER, pillar TEXT, code TEXT, status TEXT, payload TEXT, due_at TEXT, sent_at TEXT, response TEXT);
 CREATE TABLE IF NOT EXISTS contracts (id INTEGER PRIMARY KEY, partner TEXT, title TEXT, risk_level TEXT, clauses TEXT, status TEXT, created_at TEXT);
+CREATE TABLE IF NOT EXISTS integration_calls (id INTEGER PRIMARY KEY, ts TEXT, system TEXT, operation TEXT, identity TEXT, tier TEXT, case_ref TEXT, status TEXT, latency_ms INTEGER, detail TEXT);
+CREATE TABLE IF NOT EXISTS guardrail_events (id INTEGER PRIMARY KEY, ts TEXT, kind TEXT, channel TEXT, conv_id INTEGER, detail TEXT, action TEXT);
 `;
 db.exec(SCHEMA);
 // additive migrations (safe on existing databases)
@@ -40,6 +42,7 @@ const MIGRATIONS = [
   'ALTER TABLE cases ADD COLUMN conv_id INTEGER', 'ALTER TABLE cases ADD COLUMN service TEXT', 'ALTER TABLE cases ADD COLUMN team TEXT',
   'ALTER TABLE cases ADD COLUMN requester_type TEXT', 'ALTER TABLE cases ADD COLUMN reasons TEXT', 'ALTER TABLE cases ADD COLUMN details TEXT',
   'ALTER TABLE documents ADD COLUMN precheck TEXT', 'ALTER TABLE documents ADD COLUMN case_ref TEXT', 'ALTER TABLE extractions ADD COLUMN boxes TEXT', 'ALTER TABLE risk_assessments ADD COLUMN confidence INTEGER',
+  'ALTER TABLE audit_events ADD COLUMN prev_hash TEXT', 'ALTER TABLE audit_events ADD COLUMN hash TEXT',
 ];
 export function migrate() { for (const m of MIGRATIONS) { try { db.exec(m); } catch { /* column exists */ } } }
 migrate();

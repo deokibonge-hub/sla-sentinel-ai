@@ -5,6 +5,7 @@ import { iso, now, audit, notify, nextRef, DAY, HOUR } from './core.js';
 import { tobiSay, convForMsisdn } from './tobi_out.js';
 import { addTx, fmtMsisdn, fraudCheck } from './g2.js';
 import { raise, resolveAlerts } from './alerts.js';
+import { callSystem } from './trust.js';
 
 export const titleName = (n) => String(n || '').toLowerCase().replace(/(^|[\s-])\p{L}/gu, (m) => m.toUpperCase());
 export const QUIZ = [
@@ -34,6 +35,7 @@ function sendAction(a) {
   const since = new Date(now() - 7 * DAY).toISOString();
   const tx = get("SELECT COUNT(*) n, COALESCE(SUM(amount),0) v FROM g2_transactions WHERE msisdn=? AND type='PAYMENT_RECEIVED' AND ts>=?", a.msisdn, since);
   let payload = {};
+  callSystem('TRANSACTIONAL', 'tx.read', { detail: a.pillar + ' · ' + a.code });
   if (a.code === 'USAGE_TIP') {
     const low = tx.n < 15;
     tobiSay(a.conv_id, low

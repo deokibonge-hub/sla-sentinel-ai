@@ -1,5 +1,6 @@
 // G2 SIMULATOR — stands in for the internal platform that creates and operates customer / merchant / agent accounts.
 // Sentinel talks to it only through this adapter (createAccount, operate, transactions).
+import { callSystem } from './trust.js';
 import { get, all, run, s, j, setting, setSetting } from './db.js';
 import { iso, now, audit, rid, DAY, HOUR } from './core.js';
 import { raise } from './alerts.js';
@@ -59,6 +60,7 @@ export function operate(msisdn, op, { operator, role, case_ref = null, detail = 
   const a = account(msisdn);
   if (!a) throw new Error('Account not found');
   if (a.status === 'DELETED') throw new Error('Account is deleted');
+  callSystem(op === 'SIM_SWAP' ? 'ICAP' : /UNBLOCK/.test(op) ? 'IRM' : 'G2', op === 'SIM_SWAP' ? 'sim.swap' : 'op.' + String(op).toLowerCase(), { case_ref, identity: /Sentinel/.test(operator || '') ? 'bot-g2-provisioning' : 'staff:' + (role || operator || 'unknown') });
   let desc = '';
   if (op === 'SIM_SWAP') { const iccid = '8924301' + rid(12); run('UPDATE g2_accounts SET sim_iccid=?, updated_at=? WHERE msisdn=?', iccid, iso(), a.msisdn); desc = `SIM swapped → ICCID ${iccid}`; }
   else if (op === 'PIN_RESET') { run("UPDATE g2_accounts SET pin_status='RESET_PENDING', updated_at=? WHERE msisdn=?", iso(), a.msisdn); desc = 'PIN reset — temporary PIN sent by SMS'; }
